@@ -5,7 +5,7 @@ set -euo pipefail
 # Run on nginx host as root/sudo.
 #
 # Required env vars:
-#   NGINX_FQDN (example: nginx.corp.local)
+#   NGINX_FQDN (example: nginx.suat.local)
 #   CERT_PATH (path to fullchain cert, e.g. /tmp/nginx.crt)
 #   KEY_PATH  (path to private key, e.g. /tmp/nginx.key)
 

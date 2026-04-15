@@ -13,26 +13,25 @@ This guide is optimized for speed and low rework. It uses your assigned IPs and 
 - `fw-mgmt`: `172.16.150.3/24` and `172.16.200.2/28`
 - `mgmt01` (linux): `172.16.150.10/24`
 - `wazuh` (mgmt): `172.16.200.10/28`
-- `mgmt02` (windows): `172.16.200.11/28`
-- `ca`: `172.16.200.12/28`
+- `mgmt02` (windows, DC + DNS + CA): `172.16.200.11/28` (no separate CA host; use DNS alias `ca` → `mgmt02`)
 
 ---
 
 ## 0) Put scripts on GitHub once
 
-From your repo root:
+From your local clone of process631/sec350 (https://github.com/process631/sec350):
 
 ```bash
-cd ~/SEC-350-02-Enterprise-and-Network-Security-Controls
+cd ~/sec350
 git add final-assessment
-git commit -m "Add final assessment automation scripts and fast walkthrough"
-git push origin main
+git commit -m "Update final assessment scripts and walkthrough"
+git push process631 main
 ```
 
 On each VyOS firewall, run with:
 
 ```bash
-curl -L -o /config/scripts/<name>.sh https://raw.githubusercontent.com/<your-user>/SEC-350-02-Enterprise-and-Network-Security-Controls/main/final-assessment/<name>.sh
+curl -L -o /config/scripts/<name>.sh https://raw.githubusercontent.com/process631/sec350/main/final-assessment/<name>.sh
 chmod +x /config/scripts/<name>.sh
 sudo /config/scripts/<name>.sh
 ```
@@ -97,29 +96,50 @@ Expected highlights:
 
 ---
 
-## 3) mgmt02 and CA (separate hosts)
+## 3) mgmt02 (DC + DNS + CA on one host, 172.16.200.11)
 
-### 3.1 mgmt02 (172.16.200.11)
+Use your real domain name (example below: `suat.local`). Replace zone/host names if yours differs.
+
+### 3.1 Promote DC and DNS
 
 1. Rename host to `mgmt02`, set static IP `172.16.200.11/28`, gateway `172.16.200.2`.
-2. Install AD DS and promote domain (example: `corp.local`).
+2. Install AD DS and promote the forest/domain (example: `suat.local`).
 3. Create named domain power admin user (for example `power-adm`) and use it for domain config tasks.
-4. Configure DNS records for every host except traveler:
-   - `edge01`, `nginx`, `jump`, `wks01`, `fw-mgmt`, `mgmt01`, `wazuh`, `mgmt02`
+
+### 3.2 Certificate Authority on the same server
+
+After the domain exists, on **mgmt02** (elevated PowerShell):
+
+```powershell
+Install-WindowsFeature ADCS-Cert-Authority, ADCS-Web-Enrollment -IncludeManagementTools
+Install-AdcsCertificationAuthority -CAType EnterpriseRootCA -CACommonName "SUAT-ROOT-CA" -HashAlgorithmName SHA256 -KeyLength 2048 -ValidityPeriod Years -ValidityPeriodUnits 10 -Force
+Install-AdcsWebEnrollment
+```
+
+Use Web Enrollment (or cert templates) to issue certs for `jump` (SSH) and `nginx` (HTTPS).
+
+### 3.3 DNS records (every host except traveler)
+
+Create `A` records as needed. If you previously created `ca` as `172.16.200.12`, remove it and point `ca` at the DC:
+
+```powershell
+# Remove stale A record if it exists (ignore errors if missing)
+Remove-DnsServerResourceRecord -ZoneName "suat.local" -Name "ca" -RRType "A" -RecordData "172.16.200.12" -Force -ErrorAction SilentlyContinue
+
+# Alias ca -> mgmt02 (FQDN must match your DC hostname)
+Add-DnsServerResourceRecordCName -Name "ca" -HostNameAlias "mgmt02.suat.local" -ZoneName "suat.local"
+```
+
+Suggested `A` records (adjust names to match your naming):
+
+- `edge01`, `nginx`, `jump`, `log01`, `wks01`, `fw-mgmt`, `mgmt01`, `wazuh`, `mgmt02`
 
 Quick checks:
 
-- `nslookup edge01`
-- `nslookup nginx`
+- `nslookup edge01.suat.local`
+- `nslookup nginx.suat.local`
+- `nslookup ca.suat.local`
 - `ping fw-mgmt`
-
-### 3.2 CA host (172.16.200.12)
-
-1. Rename host to `ca`, set static IP `172.16.200.12/28`, gateway `172.16.200.2`, DNS `172.16.200.11`.
-2. Join `ca` to the domain.
-3. Install AD CS and issue certs for:
-   - SSH auth/cert trust workflow for `jump` accounts
-   - HTTPS server cert for `nginx`
 
 ---
 
@@ -128,7 +148,7 @@ Quick checks:
 On `jump`:
 
 ```bash
-curl -L -o /tmp/jump-hardening.sh https://raw.githubusercontent.com/<your-user>/SEC-350-02-Enterprise-and-Network-Security-Controls/main/final-assessment/jump-hardening.sh
+curl -L -o /tmp/jump-hardening.sh https://raw.githubusercontent.com/process631/sec350/main/final-assessment/jump-hardening.sh
 chmod +x /tmp/jump-hardening.sh
 sudo /tmp/jump-hardening.sh
 ```
@@ -146,9 +166,9 @@ Use CA-issued SSH cert workflow you were taught in class, then verify:
 On `nginx`:
 
 ```bash
-curl -L -o /tmp/nginx-https-waf.sh https://raw.githubusercontent.com/<your-user>/SEC-350-02-Enterprise-and-Network-Security-Controls/main/final-assessment/nginx-https-waf.sh
+curl -L -o /tmp/nginx-https-waf.sh https://raw.githubusercontent.com/process631/sec350/main/final-assessment/nginx-https-waf.sh
 chmod +x /tmp/nginx-https-waf.sh
-sudo NGINX_FQDN=nginx.corp.local CERT_PATH=/tmp/nginx.crt KEY_PATH=/tmp/nginx.key /tmp/nginx-https-waf.sh
+sudo NGINX_FQDN=nginx.suat.local CERT_PATH=/tmp/nginx.crt KEY_PATH=/tmp/nginx.key /tmp/nginx-https-waf.sh
 ```
 
 Then:
@@ -166,7 +186,7 @@ Then:
 1. Set DNS to `mgmt02`.
 2. Join AD domain.
 3. Verify name resolution for all non-traveler hosts.
-4. Browse `https://nginx` and show cert chain points to your CA.
+4. Browse `https://nginx.suat.local` (or your registered FQDN) and show cert chain points to your CA on `mgmt02`.
 
 ---
 
@@ -183,12 +203,12 @@ Minimum host coverage to demonstrate:
 
 - DMZ: `nginx`, `jump`, `log01`
 - LAN: `mgmt01`, `wks01`
-- MGMT: `mgmt02`, `ca`
+- MGMT: `mgmt02` (includes CA role; `ca` is a DNS alias only)
 
 Linux host enrollment helper:
 
 ```bash
-curl -L -o /tmp/linux-wazuh-agent-enroll.sh https://raw.githubusercontent.com/<your-user>/SEC-350-02-Enterprise-and-Network-Security-Controls/main/final-assessment/linux-wazuh-agent-enroll.sh
+curl -L -o /tmp/linux-wazuh-agent-enroll.sh https://raw.githubusercontent.com/process631/sec350/main/final-assessment/linux-wazuh-agent-enroll.sh
 chmod +x /tmp/linux-wazuh-agent-enroll.sh
 sudo WAZUH_MANAGER=172.16.200.10 /tmp/linux-wazuh-agent-enroll.sh
 ```
@@ -222,7 +242,7 @@ Proof points:
 - From `traveler`, `ping 10.0.17.115` should fail (or be blocked) per WAN ICMP requirement.
 - From `traveler`, `ssh <jumpguest>@10.0.17.115` should reach jump via DNAT.
 - From `traveler`, browsing `http://10.0.17.115` and `https://10.0.17.115` should hit nginx.
-- From `wks01`, `https://nginx` should work by DNS name with CA trust.
+- From `wks01`, `https://nginx.suat.local` should work by DNS name with CA trust.
 - Wazuh shows fresh events from DMZ, LAN, and MGMT hosts.
 - From `nginx`, `curl https://www.champlain.edu` should fail/timeout due to DMZ egress restriction.
 
@@ -231,6 +251,6 @@ Proof points:
 ## 10) Required deltas covered by scripts
 
 - `edge01-bootstrap.sh`: corrected MGMT route next-hop (`172.16.150.3`), WAN ICMP block via WAN local default drop, DNAT, DNS forwarding, RIP DMZ advertisement, and no broad DMZ outbound allow.
-- `fw-mgmt-bootstrap.sh`: corrected fw-mgmt LAN IP (`172.16.150.3`), Wazuh target (`172.16.200.10`), and split handling for `mgmt02` vs `ca`.
+- `fw-mgmt-bootstrap.sh`: corrected fw-mgmt LAN IP (`172.16.150.3`), Wazuh target (`172.16.200.10`), AD/HTTPS/Web Enrollment to consolidated DC+CA on `172.16.200.11`, and DMZ→Wazuh allow on rule 40.
 - Both firewalls include named local power users (replace placeholder hash before execution).
 
