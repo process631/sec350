@@ -16,12 +16,7 @@ set firewall ipv4 name MGMT01-RETURN rule 20 action accept
 set firewall ipv4 name MGMT01-RETURN rule 20 state related enable
 
 set firewall zone LAN from MGMT firewall name MGMT01-ANY
-set firewall zone DMZ from MGMT firewall name MGMT01-ANY
-set firewall zone WAN from MGMT firewall name MGMT01-ANY
-
 set firewall zone MGMT from LAN firewall name MGMT01-RETURN
-set firewall zone MGMT from DMZ firewall name MGMT01-RETURN
-set firewall zone MGMT from WAN firewall name MGMT01-RETURN
 
 commit
 save
