@@ -24,13 +24,17 @@ if [[ ! -f "$USER_KEY" ]]; then
   exit 1
 fi
 
+# Ensure Windows temp folder exists on CA host
+echo "[*] Ensuring C:/temp exists on CA host..."
+ssh "${CA_USER}@${CA_HOST}" "powershell -NoProfile -Command \"New-Item -ItemType Directory -Path 'C:\\temp' -Force | Out-Null\""
+
 # 1) Push public key to CA host
 echo "[*] Sending public key to CA..."
 scp "$USER_KEY" "${CA_USER}@${CA_HOST}:${REMOTE_KEY}"
 
 # 2) Ask CA host to sign the public key
 echo "[*] Requesting CA signature..."
-ssh "${CA_USER}@${CA_HOST}" "\"${CA_SSH_KEYGEN}\" -s ${CA_SIGNING_KEY} -I ${CERT_ID} -n ${CERT_PRINCIPAL} -V ${CERT_VALIDITY} ${REMOTE_KEY}"
+ssh "${CA_USER}@${CA_HOST}" "${CA_SSH_KEYGEN} -s ${CA_SIGNING_KEY} -I ${CERT_ID} -n ${CERT_PRINCIPAL} -V ${CERT_VALIDITY} ${REMOTE_KEY}"
 
 # 3) Retrieve signed certificate
 echo "[*] Retrieving signed certificate..."
